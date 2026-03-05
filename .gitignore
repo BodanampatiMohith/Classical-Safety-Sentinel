@@ -1,0 +1,55 @@
+﻿__pycache__/
+.venv/
+*.pyc
+.git/
+__MACOSX/
+.DS_Store
+*.egg-info/
+build/
+dist/
+outputs/
+uploads/
+node_modules/
+.env
+
+# Video files (too large for git)
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.flv
+*.wmv
+
+# Large model files
+*.pt
+*.pth
+*.onnx
+*.h5
+*.pb
+
+# Dataset files (DOWNLOAD REQUIRED)
+# Download datasets from: https://your-dataset-link.com
+# Place extracted dataset in TU-DAT/ directory
+TU-DAT/
+TU-DAT/**/*
+TU-DAT/**/*.mp4
+TU-DAT/**/*.avi
+TU-DAT/**/*.mov
+TU-DAT/**/*.mkv
+TU-DAT/Final_videos/
+TU-DAT/Rash-Driving/
+TU-DAT/challenging-environment/
+TU-DAT/Negative_Videos/
+TU-DAT/Positive_Videos/
+TU-DAT/beanNG/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+Thumbs.db
+*.tmp
