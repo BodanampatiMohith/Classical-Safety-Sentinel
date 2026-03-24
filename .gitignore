@@ -53,3 +53,8 @@ TU-DAT/beanNG/
 # OS files
 Thumbs.db
 *.tmp
+
+# Frontend build files
+frontend/dist/
+frontend/build/
+frontend/.vite/
