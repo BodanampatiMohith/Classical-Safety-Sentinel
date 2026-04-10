@@ -1,8 +1,8 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
 import './App.css';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 // Chart utility (using simple SVG)
 const RiskChart = ({ data, height = 150 }) => {
@@ -32,9 +32,9 @@ const RiskChart = ({ data, height = 150 }) => {
       {/* Critical threshold */}
       <line
         x1={padding}
-        y1={padding + chartHeight * (1 - 0.7)}
+        y1={padding + chartHeight * (1 - 0.58)}
         x2={width - padding}
-        y2={padding + chartHeight * (1 - 0.7)}
+        y2={padding + chartHeight * (1 - 0.58)}
         stroke="#ff3333"
         strokeWidth="2"
         strokeDasharray="5,5"
@@ -44,9 +44,9 @@ const RiskChart = ({ data, height = 150 }) => {
       {/* Warning threshold */}
       <line
         x1={padding}
-        y1={padding + chartHeight * (1 - 0.4)}
+        y1={padding + chartHeight * (1 - 0.32)}
         x2={width - padding}
-        y2={padding + chartHeight * (1 - 0.4)}
+        y2={padding + chartHeight * (1 - 0.32)}
         stroke="#ffa500"
         strokeWidth="2"
         strokeDasharray="5,5"
@@ -57,7 +57,7 @@ const RiskChart = ({ data, height = 150 }) => {
       {data.map((value, idx) => {
         const x = padding + (idx / data.length) * chartWidth;
         const barHeight = chartHeight * (value / maxRisk);
-        const color = value >= 0.7 ? '#ff3333' : value >= 0.4 ? '#ffa500' : '#00cc00';
+        const color = value >= 0.58 ? '#ff3333' : value >= 0.32 ? '#ffa500' : '#00cc00';
         
         return (
           <rect
@@ -164,7 +164,9 @@ export default function App() {
   const [liveRiskData, setLiveRiskData] = useState([]);
   const [currentSafetyLevel, setCurrentSafetyLevel] = useState('SAFE');
   const [currentRiskScore, setCurrentRiskScore] = useState(0);
-  const videoCanvasRef = useRef(null);
+  const [quickMode, setQuickMode] = useState(true);
+  const [annotatedVideoUrl, setAnnotatedVideoUrl] = useState(null);
+  const [videoLoadError, setVideoLoadError] = useState('');
   const fileInputRef = useRef(null);
 
   // Fetch system stats on load
@@ -178,6 +180,14 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (annotatedVideoUrl) {
+        URL.revokeObjectURL(annotatedVideoUrl);
+      }
+    };
+  }, [annotatedVideoUrl]);
+
   const fetchStats = async () => {
     try {
       const response = await axios.get(`${API_BASE_URL}/stats`);
@@ -190,7 +200,23 @@ export default function App() {
   const fetchEvents = async () => {
     try {
       const response = await axios.get(`${API_BASE_URL}/events`);
-      setEvents(response.data.events || []);
+      const fetchedEvents = response.data.events || [];
+      setEvents(fetchedEvents);
+
+      if (fetchedEvents.length > 0) {
+        const latestEvent = fetchedEvents[0];
+        setCurrentSafetyLevel(latestEvent.level || 'SAFE');
+        setCurrentRiskScore(Number(latestEvent.risk_score || 0));
+        setLiveRiskData(
+          fetchedEvents
+            .slice(0, 50)
+            .map((evt) => Number(evt.risk_score || 0))
+            .reverse()
+        );
+      } else {
+        setCurrentSafetyLevel('SAFE');
+        setCurrentRiskScore(0);
+      }
     } catch (error) {
       console.error('Error fetching events:', error);
     }
@@ -207,19 +233,35 @@ export default function App() {
     }
 
     setLoading(true);
+    setVideoLoadError('');
+    if (annotatedVideoUrl) {
+      URL.revokeObjectURL(annotatedVideoUrl);
+      setAnnotatedVideoUrl(null);
+    }
     const formData = new FormData();
     formData.append('file', selectedFile);
 
     try {
       const response = await axios.post(`${API_BASE_URL}/infer_clip`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
-        timeout: 300000,
+        params: quickMode ? { max_frames: 900 } : {},
+        timeout: 900000,
       });
 
       setResults(response.data);
       fetchStats();
       fetchEvents();
       setActiveTab('results');
+
+      const safetyStats = response.data.safety_stats || {};
+      const topRisk = Number(response.data.top_events?.[0]?.risk_score || 0);
+      const level = safetyStats.CRITICAL > 0
+        ? 'CRITICAL'
+        : safetyStats.WARNING > 0
+        ? 'WARNING'
+        : 'SAFE';
+      setCurrentSafetyLevel(level);
+      setCurrentRiskScore(topRisk);
 
       if (response.data.annotated_video_path) {
         setTimeout(() => {
@@ -240,19 +282,14 @@ export default function App() {
         responseType: 'blob',
       });
       const url = URL.createObjectURL(response.data);
-      const video = document.createElement('video');
-      video.src = url;
-      video.controls = true;
-      video.width = 640;
-      video.height = 480;
-      
-      const container = document.getElementById('videoContainer');
-      if (container) {
-        container.innerHTML = '';
-        container.appendChild(video);
-      }
+      setAnnotatedVideoUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return url;
+      });
+      setVideoLoadError('');
     } catch (error) {
       console.error('Error loading video:', error);
+      setVideoLoadError('Annotated video could not be loaded. Use Download Video to open it directly.');
     }
   };
 
@@ -496,6 +533,16 @@ export default function App() {
                   'Analyze Video'
                 )}
               </button>
+
+              <label style={{ marginTop: '0.75rem', display: 'inline-flex', gap: '0.5rem', alignItems: 'center', color: '#b0d4ff' }}>
+                <input
+                  type="checkbox"
+                  checked={quickMode}
+                  onChange={(e) => setQuickMode(e.target.checked)}
+                  disabled={loading}
+                />
+                Quick Mode (first 900 frames, faster for demo)
+              </label>
             </div>
           </div>
         )}
@@ -508,10 +555,20 @@ export default function App() {
               <div className="results-video">
                 <div className="video-header">
                   <h3>Annotated Analysis Video</h3>
-                  <span className="video-meta">{results.total_frames} frames processed</span>
+                  <span className="video-meta">
+                    {results.total_frames} frames processed
+                    {results.max_frames_used ? ` (capped at ${results.max_frames_used})` : ''}
+                    {results.processing_seconds ? ` • ${results.processing_seconds}s` : ''}
+                  </span>
                 </div>
                 <div id="videoContainer" className="video-container">
-                  <p className="placeholder">Processing video...</p>
+                  {annotatedVideoUrl ? (
+                    <video src={annotatedVideoUrl} controls autoPlay muted />
+                  ) : (
+                    <p className="placeholder">
+                      {videoLoadError || 'Preparing annotated video...'}
+                    </p>
+                  )}
                 </div>
               </div>
 

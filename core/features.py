@@ -9,6 +9,9 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+VEHICLE_CLASSES = {'car', 'truck', 'bus', 'bicycle', 'motorcycle', 'bike'}
+PEDESTRIAN_CLASSES = {'person'}
+
 
 class TrajectoryManager:
     """Manages trajectories and computes trajectory-based features"""
@@ -169,8 +172,8 @@ class FeatureExtractor:
             'interaction_count': 0
         }
         
-        vehicles = [o for o in objects if o['class'].lower() in ['car', 'truck', 'bus']]
-        pedestrians = [o for o in objects if o['class'].lower() in ['person']]
+        vehicles = [o for o in objects if o['class'].lower() in VEHICLE_CLASSES]
+        pedestrians = [o for o in objects if o['class'].lower() in PEDESTRIAN_CLASSES]
         
         # Vehicle-Pedestrian interactions
         for veh in vehicles:
@@ -244,9 +247,9 @@ class FeatureExtractor:
         
         for frame_info in window_data:
             for obj in frame_info['objects']:
-                if obj['class'].lower() in ['car', 'truck', 'bus']:
+                if obj['class'].lower() in VEHICLE_CLASSES:
                     total_vehicles += 1
-                elif obj['class'].lower() in ['person']:
+                elif obj['class'].lower() in PEDESTRIAN_CLASSES:
                     total_pedestrians += 1
                 
                 avg_speed += obj['speed']

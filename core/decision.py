@@ -24,23 +24,23 @@ class ClassicalRuleEngine:
     def __init__(self):
         """Initialize rule thresholds"""
         # Distance thresholds (pixels)
-        self.critical_distance_veh_ped = 80  # Vehicle-pedestrian critical
-        self.warning_distance_veh_ped = 150
+        self.critical_distance_veh_ped = 100  # Vehicle-pedestrian critical
+        self.warning_distance_veh_ped = 180
         
-        self.critical_distance_veh_veh = 150
-        self.warning_distance_veh_veh = 300
+        self.critical_distance_veh_veh = 120
+        self.warning_distance_veh_veh = 220
         
         # Speed thresholds (pixels/second)
-        self.critical_speed = 150
-        self.warning_speed = 100
+        self.critical_speed = 110
+        self.warning_speed = 70
         
         # TTC threshold (frames at current speed)
-        self.critical_ttc = 15  # ~0.6 sec at 25fps
-        self.warning_ttc = 30  # ~1.2 sec
+        self.critical_ttc = 20  # ~0.8 sec at 25fps
+        self.warning_ttc = 40  # ~1.6 sec
         
         # Closing speed threshold
-        self.critical_closing_speed = 100
-        self.warning_closing_speed = 50
+        self.critical_closing_speed = 60
+        self.warning_closing_speed = 30
     
     def evaluate_rules(self, features: Dict) -> Dict[str, bool]:
         """
@@ -55,7 +55,9 @@ class ClassicalRuleEngine:
             'warning_veh_veh_distance': False,
             'high_speed': False,
             'very_high_speed': False,
+            'moderate_closing_speed': False,
             'high_closing_speed': False,
+            'warning_ttc': False,
             'low_ttc': False,
             'mixed_traffic_close': False,
             'pedestrian_present': False
@@ -86,11 +88,15 @@ class ClassicalRuleEngine:
         closing_speed = features.get('max_closing_speed', 0)
         if closing_speed > self.critical_closing_speed:
             violations['high_closing_speed'] = True
+        elif closing_speed > self.warning_closing_speed:
+            violations['moderate_closing_speed'] = True
         
         # Rule 5: Time-to-collision
         ttc = features.get('min_ttc', 1000)
         if ttc < self.critical_ttc:
             violations['low_ttc'] = True
+        elif ttc < self.warning_ttc:
+            violations['warning_ttc'] = True
         
         # Rule 6: Mixed traffic (vehicles + pedestrians close)
         has_ped = features.get('has_pedestrians', False)
@@ -123,7 +129,9 @@ class ClassicalRuleEngine:
             'warning_veh_ped_distance',
             'warning_veh_veh_distance',
             'high_speed',
-            'mixed_traffic_close'
+            'mixed_traffic_close',
+            'warning_ttc',
+            'moderate_closing_speed'
         ]
         
         critical_count = sum(1 for rule in critical_rules if violations.get(rule, False))
@@ -147,8 +155,8 @@ class MCDMDecisionEngine:
         }
         
         # Safety state thresholds
-        self.warning_threshold = 0.4
-        self.critical_threshold = 0.7
+        self.warning_threshold = 0.32
+        self.critical_threshold = 0.58
     
     def compute_risk_score(self, 
                           deep_anomaly_score: float,
@@ -176,15 +184,23 @@ class MCDMDecisionEngine:
         violation_score = min(1.0, (critical_count * 2 + warning_count) / max_critical)
         
         # Score component 3: Distance risk (0-1)
-        min_dist = features.get('min_vehicle_pedestrian_distance', 1000)
-        distance_score = max(0, 1.0 - (min_dist / 200))  # Critical at <200px
+        min_dist = min(
+            features.get('min_vehicle_pedestrian_distance', 1000),
+            features.get('min_vehicle_vehicle_distance', 1000)
+        )
+        distance_score = max(0, 1.0 - (min_dist / 250))
         
         # Score component 4: Speed risk (0-1)
         max_speed = features.get('max_speed', 0)
         speed_score = min(1.0, max_speed / 200)
         
         # Score component 5: Pedestrian interaction risk (0-1)
-        ped_risk = 1.0 if rule_violations.get('pedestrian_present', False) else 0.0
+        ped_risk = (
+            1.0 if rule_violations.get('critical_veh_ped_distance', False) else
+            0.8 if rule_violations.get('mixed_traffic_close', False) else
+            0.6 if rule_violations.get('pedestrian_present', False) else
+            0.0
+        )
         
         # Combine with weights
         final_score = (
@@ -196,8 +212,13 @@ class MCDMDecisionEngine:
         )
         
         # Boost critical scenarios
-        if critical_count >= 2 or (rule_violations.get('critical_veh_ped_distance', False) and 
-                                   rule_violations.get('high_speed', False)):
+        if critical_count >= 2 or (
+            rule_violations.get('critical_veh_ped_distance', False) and
+            rule_violations.get('high_speed', False)
+        ) or (
+            rule_violations.get('critical_veh_veh_distance', False) and
+            rule_violations.get('very_high_speed', False)
+        ):
             final_score = min(1.0, final_score * 1.3)
         
         return final_score
@@ -225,7 +246,9 @@ class MCDMDecisionEngine:
             'warning_veh_ped_distance',
             'warning_veh_veh_distance',
             'high_speed',
-            'mixed_traffic_close'
+            'mixed_traffic_close',
+            'warning_ttc',
+            'moderate_closing_speed'
         ]
         
         critical_count = sum(1 for rule in critical_rules if violations.get(rule, False))
