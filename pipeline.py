@@ -19,6 +19,8 @@ from core.decision import HybridSafetyDecider, SafetyLevel
 
 logger = logging.getLogger(__name__)
 
+VEHICLE_CLASSES = {'car', 'truck', 'bus', 'bicycle', 'motorcycle', 'bike'}
+
 
 class SafetySentinelPipeline:
     """Complete safety detection pipeline"""
@@ -121,7 +123,7 @@ class SafetySentinelPipeline:
                 default=0
             ) if self.feature_extractor.frame_data else 0
             
-            has_veh = any(obj['class'].lower() in ['car', 'truck', 'bus'] 
+            has_veh = any(obj['class'].lower() in VEHICLE_CLASSES
                          for obj in self.feature_extractor.frame_data[-1]['objects']) \
                      if self.feature_extractor.frame_data else False
             has_ped = any(obj['class'].lower() == 'person' 
@@ -134,7 +136,8 @@ class SafetySentinelPipeline:
             safety_level, risk_score, decision_info = self.decision_engine.decide(
                 interaction_features,
                 deep_anomaly_score,
-                embedding
+                embedding,
+                use_smoothing=False
             )
             decision_time = time.time() - decision_start
             
@@ -342,6 +345,51 @@ class SafetySentinelPipeline:
         
         logger.info(f"Saved annotated video: {output_path}")
         return True
+
+    def save_annotated_video_from_results(
+        self,
+        video_path: str,
+        output_path: str,
+        results: List[Dict]
+    ) -> bool:
+        """
+        Save annotated video from precomputed frame results.
+        This avoids running full inference a second time.
+        """
+        if not results:
+            logger.warning("No results available to annotate")
+            return False
+
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            logger.error(f"Could not open video: {video_path}")
+            return False
+
+        fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+
+        frame_idx = 0
+        try:
+            while frame_idx < len(results):
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                frame_small = cv2.resize(frame, (640, 480))
+                annotated = self.get_annotated_frame(frame_small, results[frame_idx])
+                annotated_full = cv2.resize(annotated, (width, height))
+                out.write(annotated_full)
+                frame_idx += 1
+        finally:
+            cap.release()
+            out.release()
+
+        logger.info(f"Saved annotated video from cached results: {output_path}")
+        return frame_idx > 0
     
     def get_performance_stats(self) -> Dict:
         """Get performance statistics for the pipeline"""

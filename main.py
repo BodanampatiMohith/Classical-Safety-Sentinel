@@ -254,9 +254,9 @@ async def infer_video_clip(
         
         logger.info(f"⚡ Processed {len(results)} frames in {process_time:.2f}s")
         
-        # Create annotated video
+        # Create annotated video from cached results (single-pass inference)
         annotate_start = time.time()
-        pipeline.save_annotated_video(str(input_path), str(output_path), max_frames)
+        pipeline.save_annotated_video_from_results(str(input_path), str(output_path), results)
         annotate_time = time.time() - annotate_start
         
         logger.info(f"🎬 Created annotated video in {annotate_time:.2f}s")
@@ -292,7 +292,8 @@ async def infer_video_clip(
             "stats": safety_stats,
             "results": results,
             "processing_time": total_time,
-            "file_size_mb": file_size / 1024 / 1024
+            "file_size_mb": file_size / 1024 / 1024,
+            "max_frames_used": max_frames
         }
         
         logger.info(f"✅ Successfully processed {file.filename} in {total_time:.2f}s")
@@ -309,6 +310,8 @@ async def infer_video_clip(
             },
             "top_events": sorted(events, key=lambda x: x['risk_score'], reverse=True)[:5],
             "annotated_video_path": f"/download/{video_id}",
+            "max_frames_used": max_frames,
+            "processing_seconds": round(total_time, 2),
             "processing_time_seconds": round(total_time, 2),
             "timestamp": datetime.now().isoformat()
         }
